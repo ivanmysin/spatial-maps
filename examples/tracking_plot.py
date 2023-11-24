@@ -3,7 +3,9 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import math
 from scipy.ndimage.measurements import center_of_mass
-
+import sys
+sys.path.append('../spatial_maps')
+from maps import SpatialMap
 
 def plot_path(x, y, t, box_size, spike_times=None,
               color='grey', alpha=0.5, origin='upper',
@@ -159,8 +161,7 @@ def plot_head_direction_rate(spike_times, ang_bins, rate_in_ang, projection='pol
     return ax
 
 
-def plot_ratemap(x, y, t, spike_times, bin_size=0.05, box_size=1,
-                 box_size=1, vmin=0, ax=None, smoothing=.05,
+def plot_ratemap(x, y, t, spike_times, bin_size=0.05, box_size=1, vmin=0, ax=None, smoothing=.05,
                  origin='upper', cmap='viridis'):
     """
 
@@ -184,9 +185,8 @@ def plot_ratemap(x, y, t, spike_times, bin_size=0.05, box_size=1,
         fig = plt.figure()
         ax = fig.add_subplot(111, xlim=[0, 1], ylim=[0, 1], aspect=1)
 
-    map = SpatialMap(
-        x, y, t, spike_times, bin_size=bin_size, box_size=box_size)
-    rate_map = map.rate_map(smoothing)
+    map = SpatialMap(bin_size=bin_size, box_size=box_size, smoothing=smoothing)
+    rate_map = map.rate_map(x, y, t, spike_times)
     ax.imshow(rate_map, interpolation='none', origin=origin,
               extent=(0, 1, 0, 1), vmin=vmin, cmap=cmap)
     ax.set_title('%.2f Hz' % np.nanmax(rate_map))
@@ -194,7 +194,7 @@ def plot_ratemap(x, y, t, spike_times, bin_size=0.05, box_size=1,
     return ax
 
 
-def plot_occupancy(x, y, t, bin_size=0.05, box_size=1, box_size=1,
+def plot_occupancy(x, y, t, bin_size=0.05, box_size=1,
                   vmin=0, ax=None, convolve=True,
                   origin='upper', cmap='jet'):
     """
@@ -219,10 +219,81 @@ def plot_occupancy(x, y, t, bin_size=0.05, box_size=1, box_size=1,
         fig = plt.figure()
         ax = fig.add_subplot(111, xlim=[0, 1], ylim=[0, 1], aspect=1)
 
-    occ_map = occupancy_map(x, y, t, bin_size=bin_size, box_size=box_size,
+    occ_map = occupancy_map(x, y, t, bin_size=bin_size,
                              box_size=box_size, convolve=convolve)
     cax = ax.imshow(occ_map, interpolation='none', origin=origin,
                    extent=(0, 1, 0, 1), vmin=vmin, cmap=cmap, aspect='auto')
     # ax.set_title('%.2f s' % np.nanmax(occ_map))
     ax.grid(False)
     return cax, np.nanmax(occ_map)
+
+if __name__ == '__main__':
+    import h5py
+    filepath = '/home/ivan/Data/CRCNS/ec013.439.hdf5'
+
+    datafile = h5py.File(filepath)
+    sourse_fs = datafile.attrs['samplingRate']
+
+    x = datafile['animalPosition/xOfFirstLed'][:]
+    y = datafile['animalPosition/yOfFirstLed'][:]
+    coords_fs = datafile['animalPosition'].attrs['coordinatesSampleRate']
+
+    indx = np.argwhere( x > 0 )
+    indx = indx.ravel()
+    indx = np.sort(indx)
+
+    start_xyt = indx[0] / coords_fs
+    end_xyt = (indx[-1]+1) / coords_fs
+
+    x = x[indx[0] : indx[-1] + 1]
+    y = y[indx[0] : indx[-1] + 1]
+
+
+    print( np.sum(x < 0) )
+
+    print(np.min(x[x > 0]), np.max(x))
+    print(np.min(y[y > 0]), np.max(y))
+
+
+    x = x - 70
+    y = y - 20
+
+
+
+    t_xy = np.linspace(0, x.size/coords_fs,x.size)
+
+
+    for el_number, el_group in datafile.items():
+        if not('electrode' in el_number): continue
+        if el_group.attrs['brainZone'] != 'CA1' : continue
+
+        for cl_name, cl_group in el_group['spikes'].items():
+            if cl_name == 'cluster_1' or cl_name == 'cluster_2' : continue
+
+            if cl_group.attrs['type'] == 'Int' or cl_group.attrs['quality'] == 'Bad': continue
+
+            spike_times = cl_group['train'][:] / sourse_fs
+
+            spike_times = spike_times[ (spike_times >= start_xyt) & (spike_times <= end_xyt) ]
+
+            if spike_times.size < 50: continue
+
+
+            # box_size=[1.0, 1.0], bin_size=0.02
+            plot_ratemap(x, y, t_xy, spike_times, bin_size=5, box_size=[200, 200], vmin=0, ax=None, smoothing=10,
+                                           origin='upper', cmap='viridis')
+
+            plt.show()
+
+
+
+
+
+
+
+
+    # def plot_ratemap(x, y, t, spike_times, bin_size=0.05, box_size=1, vmin=0, ax=None, smoothing=.05,
+    #                  origin='upper', cmap='viridis')
+
+    datafile.close()
+
